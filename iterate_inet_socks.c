@@ -78,6 +78,38 @@ static int iterate_established_socks(struct inet_ctx *ctx)
 	return 0;
 }
 
+static int iterate_bound_socks(struct inet_ctx *ctx)
+{
+	struct inet_bind_hashbucket *bhash;
+	struct inet_bind_bucket *tb = NULL;
+	unsigned int bhash_size, i;
+	struct sock *sk;
+
+	if (!ctx ) {
+		printk(KERN_ERR "There is no ctx for iterate_bound_socks\n");
+		return -EINVAL;
+	}
+
+	bhash = ctx->hashinfo->bhash;
+	bhash_size = ctx->hashinfo->bhash_size;
+
+	for (i = 0; i < bhash_size; i++) {
+		struct inet_bind_hashbucket *head = &bhash[i];
+
+		inet_bind_bucket_for_each(tb, &head->chain) {
+			if (!hlist_empty(&tb->owners)) {
+				sk_for_each_bound(sk, &tb->owners) {
+					if (ctx->filter(sk)) {
+						ctx->cb(sk);
+					}
+				}
+			}
+		}
+	}
+
+	return 0;
+}
+
 static bool tcp_filter_wrapper(struct sock *sk)
 {
 	return true;
@@ -102,6 +134,7 @@ static int __init init_iterate(void)
 	for (i = 0; i < ARRAY_SIZE(inet_walker); i++) {
 		iterate_listening_socks(&inet_walker[i]);
 		iterate_established_socks(&inet_walker[i]);
+		iterate_bound_socks(&inet_walker[i]);
 	}
 
 	return 0;
