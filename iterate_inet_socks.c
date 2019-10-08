@@ -5,33 +5,55 @@
 #include <net/inet_hashtables.h>
 #include <net/sock.h>
 #include <net/tcp.h>
+#include <net/udp.h>
 
 struct inet_ctx {
-	struct inet_hashinfo *hashinfo;
+	void *tableinfo;
 	bool (*filter)(struct sock *sk);
 	void (*cb)(struct sock *sk);
 };
+
+static bool tcp_filter_wrapper(struct sock *sk)
+{
+	return true;
+}
+
+static void tcp_cb(struct sock *sk)
+{
+	printk(KERN_ERR "tcp sock [ %p ]\n", sk);
+}
+
+static bool udp_filter(struct sock *sk)
+{
+	return 	sk->sk_protocol == IPPROTO_UDP ||
+		sk->sk_protocol == IPPROTO_UDPLITE;
+}
+
+static void udp_cb(struct sock *sk)
+{
+	printk(KERN_ERR "udp sock [ %p ]\n", sk);
+}
 
 static int iterate_listening_socks(struct inet_ctx *ctx)
 {
 	struct inet_listen_hashbucket *ilb;
 	struct inet_hashinfo *hashinfo;
 	struct sock *sk;
-	unsigned int i;
+	unsigned int bucket;
 
 	if (!ctx ) {
 		printk(KERN_ERR "There is no ctx for iterate_established_tcp_socks\n");
 		return -EINVAL;
 	}
 
-	hashinfo = ctx->hashinfo;
+	hashinfo = (struct inet_hashinfo *)ctx->tableinfo;
 
 	/*
 	* NOTE(anesterenko)
 	* iterate all  buckets in tcp_hashinfo listensock table
 	*/
-	for (i = 0; i < INET_LHTABLE_SIZE; i++) {
-		ilb = &hashinfo->listening_hash[i];
+	for (bucket = 0; bucket < INET_LHTABLE_SIZE; bucket++) {
+		ilb = &hashinfo->listening_hash[bucket];
 		sk = sk_head(&ilb->head);
 
 		sk_for_each_from(sk) {
@@ -49,26 +71,26 @@ static int iterate_established_socks(struct inet_ctx *ctx)
 	struct inet_ehash_bucket *ehash;
 	unsigned int ehash_mask;
 	struct sock *sk;
-	unsigned int i;
+	unsigned int bucket;
 
 	if (!ctx ) {
 		printk(KERN_ERR "There is no ctx for iterate_established_tcp_socks\n");
 		return -EINVAL;
 	}
 
-	ehash = ctx->hashinfo->ehash;
-	ehash_mask = ctx->hashinfo->ehash_mask;
+	ehash = ((struct inet_hashinfo *)ctx->tableinfo)->ehash;
+	ehash_mask = ((struct inet_hashinfo *)ctx->tableinfo)->ehash_mask;
 
 	/*
 	* NOTE(anesterenko)
 	* iterate all  buckets in tcp_hashinfo ehash table
 	*/
-	for (i = 0; i < ehash_mask; i++) {
+	for (bucket = 0; bucket < ehash_mask; bucket++) {
 		struct hlist_nulls_node *node;
-		if (hlist_nulls_empty(&ehash[i].chain))
+		if (hlist_nulls_empty(&ehash[bucket].chain))
 			continue;
 
-		sk_nulls_for_each(sk, node, &ehash[i].chain) {
+		sk_nulls_for_each(sk, node, &ehash[bucket].chain) {
 			if (ctx->filter(sk)) {
 				ctx->cb(sk);
 			}
@@ -82,7 +104,7 @@ static int iterate_bound_socks(struct inet_ctx *ctx)
 {
 	struct inet_bind_hashbucket *bhash;
 	struct inet_bind_bucket *tb = NULL;
-	unsigned int bhash_size, i;
+	unsigned int bhash_size, bucket;
 	struct sock *sk;
 
 	if (!ctx ) {
@@ -90,11 +112,11 @@ static int iterate_bound_socks(struct inet_ctx *ctx)
 		return -EINVAL;
 	}
 
-	bhash = ctx->hashinfo->bhash;
-	bhash_size = ctx->hashinfo->bhash_size;
+	bhash = ((struct inet_hashinfo *)ctx->tableinfo)->bhash;
+	bhash_size = ((struct inet_hashinfo *)ctx->tableinfo)->bhash_size;
 
-	for (i = 0; i < bhash_size; i++) {
-		struct inet_bind_hashbucket *head = &bhash[i];
+	for (bucket = 0; bucket < bhash_size; bucket++) {
+		struct inet_bind_hashbucket *head = &bhash[bucket];
 
 		inet_bind_bucket_for_each(tb, &head->chain) {
 			if (!hlist_empty(&tb->owners)) {
@@ -110,21 +132,40 @@ static int iterate_bound_socks(struct inet_ctx *ctx)
 	return 0;
 }
 
-static bool tcp_filter_wrapper(struct sock *sk)
+static int iterate_udp(struct inet_ctx *ctx)
 {
-	return true;
+	struct udp_table *udptable;
+	struct sock	 *sk;
+	unsigned int 	  bucket;
+
+	if (!ctx) {
+		printk(KERN_ERR "There is no ctx for iterate_udp_socks\n");
+		return -EINVAL;
+	}
+
+	udptable = (struct udp_table *)ctx->tableinfo;
+
+	for (bucket = 0; bucket <= udptable->mask; bucket++) {
+		struct udp_hslot *hslot = &udptable->hash[bucket];
+
+		if (hlist_empty(&hslot->head))
+			continue;
+
+		sk_for_each(sk, &hslot->head) {
+			if (ctx->filter(sk)) {
+				ctx->cb(sk);
+			}
+		}
+	}
+
+	return 0;
 }
 
-static void tcp_cb(struct sock *sk)
-{
-	printk(KERN_ERR "tcp sock [ %p ]\n", sk);
-}
-
-static int __init init_iterate(void)
+static int iterate_tcp_socks(void)
 {
 	struct inet_ctx inet_walker[] = {
 		{
-			.hashinfo = &tcp_hashinfo,
+			.tableinfo = &tcp_hashinfo,
 			.filter = tcp_filter_wrapper,
 			.cb = tcp_cb
 		}
@@ -138,6 +179,37 @@ static int __init init_iterate(void)
 	}
 
 	return 0;
+}
+
+static int iterate_udp_socks(void)
+{
+	struct inet_ctx inet_walker[] = {
+		{
+			.tableinfo = &udp_table,
+			.filter = udp_filter,
+			.cb = udp_cb
+		}
+	};
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(inet_walker); i++) {
+		iterate_udp(&inet_walker[i]);
+	}
+
+	return 0;
+}
+
+static int __init init_iterate(void)
+{
+	int result;
+
+	result = iterate_tcp_socks();
+	if (result)
+		return result;
+
+	result = iterate_udp_socks();
+
+	return result;
 }
 
 static void __exit exit_iterate(void)
