@@ -47,6 +47,8 @@ static int iterate_listening_socks(struct inet_ctx *ctx)
 		return -EINVAL;
 	}
 
+	printk(KERN_ERR "iterating tcp socks [listening]...\n");
+
 	hashinfo = (struct inet_hashinfo *)ctx->tableinfo;
 
 	/*
@@ -81,6 +83,8 @@ static int iterate_established_socks(struct inet_ctx *ctx)
 		printk(KERN_ERR "There is no ctx for iterate_established_tcp_socks\n");
 		return -EINVAL;
 	}
+
+	printk(KERN_ERR "iterating tcp socks [established]...\n");
 
 	ehash = ((struct inet_hashinfo *)ctx->tableinfo)->ehash;
 	ehash_mask = ((struct inet_hashinfo *)ctx->tableinfo)->ehash_mask;
@@ -122,6 +126,8 @@ static int iterate_bound_socks(struct inet_ctx *ctx)
 		return -EINVAL;
 	}
 
+	printk(KERN_ERR "iterating tcp socks [bound]...\n");
+
 	bhash = ((struct inet_hashinfo *)ctx->tableinfo)->bhash;
 	bhash_size = ((struct inet_hashinfo *)ctx->tableinfo)->bhash_size;
 
@@ -154,6 +160,8 @@ static int iterate_udp(struct inet_ctx *ctx)
 		printk(KERN_ERR "There is no ctx for iterate_udp_socks\n");
 		return -EINVAL;
 	}
+
+	printk(KERN_ERR "iterating udp socks...\n");
 
 	udptable = (struct udp_table *)ctx->tableinfo;
 
@@ -229,6 +237,8 @@ static int __init init_iterate(void)
 		return result;
 
 	result = iterate_udp_socks();
+
+	printk(KERN_ERR "\ndone\n");
 
 	return result;
 }
