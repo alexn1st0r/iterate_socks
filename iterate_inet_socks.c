@@ -6,6 +6,7 @@
 #include <net/sock.h>
 #include <net/tcp.h>
 #include <net/udp.h>
+#include <net/udplite.h>
 
 struct inet_ctx {
 	void *tableinfo;
@@ -201,6 +202,11 @@ static int iterate_udp_socks(void)
 	struct inet_ctx inet_walker[] = {
 		{
 			.tableinfo = &udp_table,
+			.filter = udp_filter,
+			.cb = udp_cb
+		},
+		{
+			.tableinfo = &udplite_table,
 			.filter = udp_filter,
 			.cb = udp_cb
 		}
