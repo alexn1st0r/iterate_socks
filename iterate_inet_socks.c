@@ -21,7 +21,7 @@ static bool tcp_filter_wrapper(struct sock *sk)
 
 static void tcp_cb(struct sock *sk)
 {
-	printk(KERN_ERR "tcp sock [ %p ]\n", sk);
+	printk(KERN_ERR "tcp sock [ %px ]\n", sk);
 }
 
 static bool udp_filter(struct sock *sk)
@@ -32,7 +32,7 @@ static bool udp_filter(struct sock *sk)
 
 static void udp_cb(struct sock *sk)
 {
-	printk(KERN_ERR "udp sock [ %p ]\n", sk);
+	printk(KERN_ERR "udp sock [ %px ]\n", sk);
 }
 
 static int iterate_listening_socks(struct inet_ctx *ctx)
